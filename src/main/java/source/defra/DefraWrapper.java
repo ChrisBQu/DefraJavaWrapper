@@ -2,8 +2,8 @@ package source.defra;
 
 public class DefraWrapper {
     static {
+		System.loadLibrary("nativewrapper");
         System.loadLibrary("defradb");
-        System.loadLibrary("nativewrapper");
     }
 
     // JNI declarations

@@ -12,6 +12,8 @@
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
 typedef struct { const char *p; ptrdiff_t n; } _GoString_;
+extern size_t _GoStringLen(_GoString_ s);
+extern const char *_GoStringPtr(_GoString_ s);
 #endif
 
 #endif
@@ -26,6 +28,26 @@ typedef struct { const char *p; ptrdiff_t n; } _GoString_;
 
 #line 1 "cgo-generated-wrapper"
 
+#line 13 "add_collection.go"
+
+#include <stdlib.h>
+#include "defra_structs.h"
+
+#line 1 "cgo-generated-wrapper"
+
+#line 3 "ble.go"
+
+#include <stdlib.h>
+#include <jni.h>
+
+extern void DefraBLE_SetBleInterface(JavaVM* jvm, jobject bleInterface);
+extern void CallStart(const char* localPID);
+extern jboolean CallDialPeer(const char* remotePID);
+extern jboolean CallSendToPeer(const char* remotePID, void* payload, int length);
+extern void CallCloseConnWithPeer(const char* remotePID);
+
+#line 1 "cgo-generated-wrapper"
+
 #line 13 "block.go"
 
 #include <stdlib.h>
@@ -34,6 +56,20 @@ typedef struct { const char *p; ptrdiff_t n; } _GoString_;
 #line 1 "cgo-generated-wrapper"
 
 #line 13 "collection.go"
+
+#include <stdlib.h>
+#include "defra_structs.h"
+
+#line 1 "cgo-generated-wrapper"
+
+#line 13 "document.go"
+
+#include <stdlib.h>
+#include "defra_structs.h"
+
+#line 1 "cgo-generated-wrapper"
+
+#line 13 "encrypted_index.go"
 
 #include <stdlib.h>
 #include "defra_structs.h"
@@ -76,13 +112,6 @@ typedef struct { const char *p; ptrdiff_t n; } _GoString_;
 #line 1 "cgo-generated-wrapper"
 
 #line 13 "query.go"
-
-#include <stdlib.h>
-#include "defra_structs.h"
-
-#line 1 "cgo-generated-wrapper"
-
-#line 13 "schema.go"
 
 #include <stdlib.h>
 #include "defra_structs.h"
@@ -134,9 +163,15 @@ typedef size_t GoUintptr;
 typedef float GoFloat32;
 typedef double GoFloat64;
 #ifdef _MSC_VER
+#if !defined(__cplusplus) || _MSVC_LANG <= 201402L
 #include <complex.h>
 typedef _Fcomplex GoComplex64;
 typedef _Dcomplex GoComplex128;
+#else
+#include <complex>
+typedef std::complex<float> GoComplex64;
+typedef std::complex<double> GoComplex128;
+#endif
 #else
 typedef float _Complex GoComplex64;
 typedef double _Complex GoComplex128;
@@ -172,55 +207,57 @@ extern Result ACPReEnableNAC(uintptr_t nodePtr, uintptr_t identityPtr);
 extern Result ACPAddNACActorRelationship(uintptr_t nodePtr, uintptr_t identityPtr, char* relation, char* actor);
 extern Result ACPDeleteNACActorRelationship(uintptr_t nodePtr, uintptr_t identityPtr, char* relation, char* actor);
 extern Result ACPGetNACStatus(uintptr_t nodePtr, uintptr_t identityPtr);
-extern Result BlockVerifySignature(uintptr_t nodePtr, char* keyType, char* publicKey, char* cid);
-extern Result CollectionCreate(uintptr_t nodePtr, char* json, int isEncrypted, char* encryptedFields, CollectionOptions options);
-extern Result CollectionDelete(uintptr_t nodePtr, char* docIDStr, char* filterStr, CollectionOptions options);
-extern Result CollectionDescribe(uintptr_t nodePtr, CollectionOptions options);
-extern Result CollectionListDocIDs(uintptr_t nodePtr, CollectionOptions options);
-extern Result CollectionGet(uintptr_t nodePtr, char* docIDStr, int showDeleted, CollectionOptions options);
-extern Result CollectionPatch(uintptr_t nodePtr, char* patch, char* lensConfig, CollectionOptions options);
-extern Result CollectionUpdate(uintptr_t nodePtr, char* docIDStr, char* filterStr, char* updaterStr, CollectionOptions options);
-extern Result SetActiveCollection(uintptr_t nodePtr, char* version);
-extern NewIdentityResult IdentityNew(char* keyType);
-extern Result NodeIdentity(uintptr_t nodePtr);
-extern Result IndexCreate(uintptr_t nodePtr, char* collectionName, char* indexName, char* fieldsStr, int isUnique);
-extern Result IndexList(uintptr_t nodePtr, char* collectionName);
-extern Result IndexDrop(uintptr_t nodePtr, char* collectionName, char* indexName);
-extern Result LensSet(uintptr_t nodePtr, char* src, char* dst, char* cfg);
-extern Result LensDown(uintptr_t nodePtr, char* collectionID, char* documents);
-extern Result LensUp(uintptr_t nodePtr, char* collectionID, char* documents);
-extern Result LensReload(uintptr_t nodePtr);
-extern Result LensSetRegistry(uintptr_t nodePtr, char* collectionID, char* cfg);
+extern Result AddCollection(uintptr_t nodePtr, char* sdl, uintptr_t identityPtr);
+extern int BLEHandleFoundPeer(char* remotePID);
+extern void BLEHandleLostPeer(char* remotePID);
+extern void BLEReceiveFromPeer(char* remotePID, void* payload, int length);
+extern Result VerifyBlockSignature(uintptr_t nodePtr, char* keyType, char* publicKey, char* cid, uintptr_t identityPtr);
+extern Result DescribeCollection(uintptr_t nodePtr, CollectionOptions opts, uintptr_t identityPtr);
+extern Result PatchCollection(uintptr_t nodePtr, char* patch, char* lensConfig, uintptr_t identityPtr);
+extern Result SetActiveCollection(uintptr_t nodePtr, CollectionOptions opts, uintptr_t identityPtr);
+extern Result TruncateCollection(uintptr_t nodePtr, CollectionOptions opts, uintptr_t identityPtr);
+extern Result AddDocument(uintptr_t nodePtr, char* json, int isEncrypted, char* encryptedFields, CollectionOptions opts, uintptr_t identityPtr);
+extern Result DeleteDocument(uintptr_t nodePtr, char* docIDStr, char* filterStr, CollectionOptions opts, uintptr_t identityPtr);
+extern Result GetDocument(uintptr_t nodePtr, char* docIDStr, int showDeleted, CollectionOptions opts, uintptr_t identityPtr);
+extern Result UpdateDocument(uintptr_t nodePtr, char* docIDStr, char* filterStr, char* updaterStr, CollectionOptions opts, uintptr_t identityPtr);
+extern Result NewEncryptedIndex(uintptr_t nodePtr, char* collectionName, char* fieldName, uintptr_t identityPtr);
+extern Result ListEncryptedIndexes(uintptr_t nodePtr, char* collectionName, uintptr_t identityPtr);
+extern Result DeleteEncryptedIndex(uintptr_t nodePtr, char* collectionName, char* fieldName, uintptr_t identityPtr);
+extern NewIdentityResult NewIdentity(char* keyType);
+extern Result GetNodeIdentity(uintptr_t nodePtr);
+extern void FreeIdentity(uintptr_t identityPtr);
+extern Result NewIndex(uintptr_t nodePtr, char* indexName, char* fieldsStr, int isUnique, CollectionOptions options, uintptr_t identityPtr);
+extern Result ListIndexes(uintptr_t nodePtr, CollectionOptions options, uintptr_t identityPtr);
+extern Result DeleteIndex(uintptr_t nodePtr, char* indexName, CollectionOptions options, uintptr_t identityPtr);
+extern Result SetLens(uintptr_t nodePtr, uintptr_t identityPtr, char* src, char* dst, char* cfg);
+extern Result AddLens(uintptr_t nodePtr, uintptr_t identityPtr, char* cfg);
+extern Result ListLenses(uintptr_t nodePtr, uintptr_t identityPtr);
 extern NewNodeResult NewNode(NodeInitOptions cOptions);
-extern Result NodeClose(uintptr_t nodePtr);
-extern Result P2PInfo(uintptr_t nodePtr);
-extern Result P2PgetAllReplicators(uintptr_t nodePtr);
-extern Result P2PsetReplicator(uintptr_t nodePtr, char* collections, char* peerInfo);
-extern Result P2PdeleteReplicator(uintptr_t nodePtr, char* collections, char* peerInfo);
-extern Result P2PcollectionAdd(uintptr_t nodePtr, char* collections);
-extern Result P2PcollectionRemove(uintptr_t nodePtr, char* collections);
-extern Result P2PcollectionGetAll(uintptr_t nodePtr);
-extern Result P2PdocumentAdd(uintptr_t nodePtr, char* collections);
-extern Result P2PdocumentRemove(uintptr_t nodePtr, char* collections);
-extern Result P2PdocumentGetAll(uintptr_t nodePtr);
-extern Result P2PdocumentSync(uintptr_t nodePtr, char* collection, char* docIDs, char* timeoutStr);
-extern Result P2Pconnect(uintptr_t nodePtr, char* peerID, char* peerAddresses);
-
-// PollSubscription will get the subscription object associcated with an ID, and if
-// it exists will see if there's a message in its result channel. If there isn't, it will
-// return with status 2, and a blank payload. If there is, it will return with status 0,
-// and the payload of the message. If an error occurs, status 1 is returned.
-//
+extern Result CloseNode(uintptr_t nodePtr);
+extern Result GetP2PInfo(uintptr_t nodePtr, uintptr_t identityPtr);
+extern Result ListP2PActivePeers(uintptr_t nodePtr, uintptr_t identityPtr);
+extern Result ListP2PReplicators(uintptr_t nodePtr, uintptr_t identityPtr);
+extern Result AddP2PReplicator(uintptr_t nodePtr, char* collections, char* addresses, uintptr_t identityPtr);
+extern Result DeleteP2PReplicator(uintptr_t nodePtr, char* collections, char* id, uintptr_t identityPtr);
+extern Result AddP2PCollection(uintptr_t nodePtr, char* collections, uintptr_t identityPtr);
+extern Result DeleteP2PCollection(uintptr_t nodePtr, char* collections, uintptr_t identityPtr);
+extern Result ListP2PCollections(uintptr_t nodePtr, uintptr_t identityPtr);
+extern Result AddP2PDocument(uintptr_t nodePtr, char* collections, uintptr_t identityPtr);
+extern Result DeleteP2PDocument(uintptr_t nodePtr, char* collections, uintptr_t identityPtr);
+extern Result ListP2PDocuments(uintptr_t nodePtr, uintptr_t identityPtr);
+extern Result SyncP2PDocuments(uintptr_t nodePtr, char* collection, char* docIDs, char* timeoutStr, uintptr_t identityPtr);
+extern Result SyncP2PCollectionVersions(uintptr_t nodePtr, char* versionIDs, char* timeoutStr, uintptr_t identityPtr);
+extern Result SyncP2PBranchableCollection(uintptr_t nodePtr, char* collectionID, char* timeoutStr, uintptr_t identityPtr);
+extern Result ConnectP2PPeers(uintptr_t nodePtr, char* peerAddresses, uintptr_t identityPtr);
 extern Result PollSubscription(char* id);
 extern Result CloseSubscription(char* id);
 extern Result ExecuteQuery(uintptr_t nodePtr, char* query, uintptr_t identityPtr, char* operationName, char* variables);
-extern Result AddSchema(uintptr_t nodePtr, char* schema, uintptr_t identityPtr);
-extern NewTxnResult TransactionCreate(uintptr_t nodePtr, int isConcurrent, int isReadOnly);
-extern Result TransactionCommit(uintptr_t txnPtr);
-extern void TransactionDiscard(uintptr_t txnPtr);
-extern Result VersionGet(int flagFull, int flagJSON);
-extern Result ViewAdd(uintptr_t nodePtr, char* query, char* sdl, char* transformStr);
-extern Result ViewRefresh(uintptr_t nodePtr, char* viewNameStr, char* collectionIDStr, char* versionIDStr, int getInactive);
+extern NewTxnResult CreateTransaction(uintptr_t nodePtr, int isConcurrent, int isReadOnly);
+extern Result CommitTransaction(uintptr_t txnPtr);
+extern void DiscardTransaction(uintptr_t txnPtr);
+extern Result GetVersion(int flagFull, int flagJSON);
+extern Result AddView(uintptr_t nodePtr, char* query, char* sdl, char* transformCIDStr, uintptr_t identityPtr);
+extern Result RefreshView(uintptr_t nodePtr, CollectionOptions cOptions, uintptr_t identityPtr);
 
 #ifdef __cplusplus
 }

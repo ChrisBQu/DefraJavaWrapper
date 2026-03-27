@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Forward declarations
+void releaseJavaNodeInitOptions(JNIEnv* env, jobject optionsObj, NodeInitOptions opts);
+void releaseJavaCollectionOptions(JNIEnv* env, jobject optionsObj, CollectionOptions opts);
+
 jobject returnDefraResult(JNIEnv* env, Result res) {
     jstring errorStr = res.error ? (*env)->NewStringUTF(env, res.error) : NULL;
     jstring valueStr = res.value ? (*env)->NewStringUTF(env, res.value) : NULL;
@@ -57,17 +61,6 @@ NodeInitOptions convertJavaNodeInitOptions(JNIEnv* env, jobject optionsObj) {
     opts.replicatorRetryIntervals = (*env)->GetStringUTFChars(env, replicatorRetryIntervalsStr, 0);
     opts.peers = (*env)->GetStringUTFChars(env, peersStr, 0);
 
-    // Identity pointer
-    jfieldID fid_identity = (*env)->GetFieldID(env, cls, "identity", "Lsource/defra/DefraIdentity;");
-    jobject identityObj = (*env)->GetObjectField(env, optionsObj, fid_identity);
-    if (identityObj != NULL) {
-        jclass identityCls = (*env)->GetObjectClass(env, identityObj);
-        jfieldID fid_ptr = (*env)->GetFieldID(env, identityCls, "ptr", "J");
-        opts.identityPtr = (uintptr_t)(*env)->GetLongField(env, identityObj, fid_ptr);
-    } else {
-        opts.identityPtr = 0;
-    }
-
     // Booleans
     jfieldID fid_inMemory = (*env)->GetFieldID(env, cls, "inMemory", "Z");
     jfieldID fid_disableP2P = (*env)->GetFieldID(env, cls, "disableP2P", "Z");
@@ -104,29 +97,12 @@ CollectionOptions convertJavaCollectionOptions(JNIEnv* env, jobject optionsObj) 
     opts.collectionID = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, 0) : NULL;
     opts.name = nameStr ? (*env)->GetStringUTFChars(env, nameStr, 0) : NULL;
 
-    // Identity (via getPointer())
-    jfieldID fid_identity = (*env)->GetFieldID(env, cls, "identity", "Lsource/defra/DefraIdentity;");
-    jobject identityObj = (*env)->GetObjectField(env, optionsObj, fid_identity);
-    if (identityObj != NULL) {
-        jclass identityCls = (*env)->GetObjectClass(env, identityObj);
-        jmethodID mid_getPointer = (*env)->GetMethodID(env, identityCls, "getPointer", "()J");
-        if (mid_getPointer != NULL) {
-            jlong ptr = (*env)->CallLongMethod(env, identityObj, mid_getPointer);
-            opts.identityPtr = (uintptr_t)ptr;
-        } else {
-            opts.identityPtr = 0;
-        }
-    } else {
-        opts.identityPtr = 0;
-    }
-
     // Boolean
     jfieldID fid_getInactive = (*env)->GetFieldID(env, cls, "getInactive", "Z");
     opts.getInactive = (*env)->GetBooleanField(env, optionsObj, fid_getInactive) ? 1 : 0;
 
     return opts;
 }
-
 
 // Helper to release allocated Java strings after the call
 void releaseJavaNodeInitOptions(JNIEnv* env, jobject optionsObj, NodeInitOptions opts) {
@@ -147,6 +123,25 @@ void releaseJavaNodeInitOptions(JNIEnv* env, jobject optionsObj, NodeInitOptions
     (*env)->ReleaseStringUTFChars(env, peersStr, opts.peers);
 }
 
+void releaseJavaCollectionOptions(JNIEnv* env, jobject optionsObj, CollectionOptions opts) {
+    jclass cls = (*env)->GetObjectClass(env, optionsObj);
+    jfieldID fid_version = (*env)->GetFieldID(env, cls, "version", "Ljava/lang/String;");
+    jfieldID fid_collectionID = (*env)->GetFieldID(env, cls, "collectionID", "Ljava/lang/String;");
+    jfieldID fid_name = (*env)->GetFieldID(env, cls, "name", "Ljava/lang/String;");
+
+    jstring versionStr = (jstring)(*env)->GetObjectField(env, optionsObj, fid_version);
+    jstring collectionIDStr = (jstring)(*env)->GetObjectField(env, optionsObj, fid_collectionID);
+    jstring nameStr = (jstring)(*env)->GetObjectField(env, optionsObj, fid_name);
+
+    if (opts.version) (*env)->ReleaseStringUTFChars(env, versionStr, opts.version);
+    if (opts.collectionID) (*env)->ReleaseStringUTFChars(env, collectionIDStr, opts.collectionID);
+    if (opts.name) (*env)->ReleaseStringUTFChars(env, nameStr, opts.name);
+}
+
+//=============================================================================
+// DefraNode JNI Functions
+//=============================================================================
+
 JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_NewNodeNative
 (JNIEnv *env, jobject thisObj, jobject optionsObj) {
     NodeInitOptions opts = convertJavaNodeInitOptions(env, optionsObj);
@@ -160,7 +155,7 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_NodeCloseNative(
     jobject thiz,
     jlong nodePtr
 ) {
-    Result res = NodeClose((uintptr_t)nodePtr);
+    Result res = CloseNode((uintptr_t)nodePtr);
     return returnDefraResult(env, res);
 }
 
@@ -283,142 +278,43 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ACPGetNACStatusNative(
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddSchemaNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddCollectionNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring schemaStr,
+    jstring sdlStr,
     jlong identityPtr
 ) {
-    const char* schemaC = schemaStr ? (*env)->GetStringUTFChars(env, schemaStr, NULL) : NULL;
-    Result res = AddSchema((uintptr_t)nodePtr, (char*)schemaC, (uintptr_t)identityPtr);
-    if (schemaStr) (*env)->ReleaseStringUTFChars(env, schemaStr, schemaC);
+    const char* sdlC = sdlStr ? (*env)->GetStringUTFChars(env, sdlStr, NULL) : NULL;
+    Result res = AddCollection((uintptr_t)nodePtr, (char*)sdlC, (uintptr_t)identityPtr);
+    if (sdlStr) (*env)->ReleaseStringUTFChars(env, sdlStr, sdlC);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_BlockVerifySignatureNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DescribeCollectionNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring keyTypeStr,
-    jstring publicKeyStr,
-    jstring cidStr
-) {
-    const char* keyTypeC = keyTypeStr ? (*env)->GetStringUTFChars(env, keyTypeStr, NULL) : NULL;
-    const char* publicKeyC = publicKeyStr ? (*env)->GetStringUTFChars(env, publicKeyStr, NULL) : NULL;
-    const char* cidC = cidStr ? (*env)->GetStringUTFChars(env, cidStr, NULL) : NULL;
-    Result res = BlockVerifySignature((uintptr_t)nodePtr, (char*)keyTypeC, (char*)publicKeyC, (char*)cidC);
-    if (keyTypeStr) (*env)->ReleaseStringUTFChars(env, keyTypeStr, keyTypeC);
-    if (publicKeyStr) (*env)->ReleaseStringUTFChars(env, publicKeyStr, publicKeyC);
-    if (cidStr) (*env)->ReleaseStringUTFChars(env, cidStr, cidC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionCreateNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring jsonStr,
-    jint isEncrypted,
-    jstring encryptedFieldsStr,
-    jobject optionsObj
-) {
-    const char* jsonC = jsonStr ? (*env)->GetStringUTFChars(env, jsonStr, NULL) : NULL;
-    const char* encryptedFieldsC = encryptedFieldsStr ? (*env)->GetStringUTFChars(env, encryptedFieldsStr, NULL) : NULL;
-    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);  
-    Result res = CollectionCreate((uintptr_t)nodePtr, (char*)jsonC, isEncrypted, (char*)encryptedFieldsC, opts);
-    if (jsonStr) (*env)->ReleaseStringUTFChars(env, jsonStr, jsonC);
-    if (encryptedFieldsStr) (*env)->ReleaseStringUTFChars(env, encryptedFieldsStr, encryptedFieldsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionDeleteNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring docIDStr,
-    jstring filterStr,
-    jobject optionsObj
-) {
-    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
-    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
-    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    Result res = CollectionDelete((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, opts);
-    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
-    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionDescribeNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jobject optionsObj
+    jobject optionsObj,
+    jlong identityPtr
 ) {
     CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    Result res = CollectionDescribe((uintptr_t)nodePtr, opts);
+    Result res = DescribeCollection((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionListDocIDsNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jobject optionsObj
-) {
-    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    Result res = CollectionListDocIDs((uintptr_t)nodePtr, opts);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionUpdateNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring jsonStr,
-    jstring filterStr,
-    jstring updaterStr,
-    jobject optionsObj
-) {
-    const char* jsonC = jsonStr ? (*env)->GetStringUTFChars(env, jsonStr, NULL) : NULL;
-    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
-    const char* updaterC = updaterStr ? (*env)->GetStringUTFChars(env, updaterStr, NULL) : NULL;
-    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    Result res = CollectionUpdate((uintptr_t)nodePtr, (char*)jsonC, (char*)filterC, (char*)updaterC, opts);
-    if (jsonStr) (*env)->ReleaseStringUTFChars(env, jsonStr, jsonC);
-    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
-    if (updaterStr) (*env)->ReleaseStringUTFChars(env, updaterStr, updaterC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionGetNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring docIDStr,
-    jboolean showDeleted,
-    jobject optionsObj
-) {
-    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
-    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    int showDeletedC = (showDeleted == JNI_TRUE) ? 1 : 0;
-    Result res = CollectionGet((uintptr_t)nodePtr, (char*)docIDC, showDeletedC, opts);
-    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CollectionPatchNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_PatchCollectionNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
     jstring patchStr,
     jstring lensConfigStr,
-    jobject optionsObj
+    jlong identityPtr
 ) {
     const char* patchC = patchStr ? (*env)->GetStringUTFChars(env, patchStr, NULL) : NULL;
     const char* lensConfigC = lensConfigStr ? (*env)->GetStringUTFChars(env, lensConfigStr, NULL) : NULL;
-    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    Result res = CollectionPatch((uintptr_t)nodePtr, (char*)patchC, (char*)lensConfigC, opts);
+    Result res = PatchCollection((uintptr_t)nodePtr, (char*)patchC, (char*)lensConfigC, (uintptr_t)identityPtr);
     if (patchStr) (*env)->ReleaseStringUTFChars(env, patchStr, patchC);
     if (lensConfigStr) (*env)->ReleaseStringUTFChars(env, lensConfigStr, lensConfigC);
     return returnDefraResult(env, res);
@@ -428,11 +324,199 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_SetActiveCollectionNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring versionStr
+    jobject optionsObj,
+    jlong identityPtr
 ) {
-    const char* versionC = versionStr ? (*env)->GetStringUTFChars(env, versionStr, NULL) : NULL;
-    Result res = SetActiveCollection((uintptr_t)nodePtr, (char*)versionC);
-    if (versionStr) (*env)->ReleaseStringUTFChars(env, versionStr, versionC);
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = SetActiveCollection((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_TruncateCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = TruncateCollection((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring jsonStr,
+    jint isEncrypted,
+    jstring encryptedFieldsStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* jsonC = jsonStr ? (*env)->GetStringUTFChars(env, jsonStr, NULL) : NULL;
+    const char* encryptedFieldsC = encryptedFieldsStr ? (*env)->GetStringUTFChars(env, encryptedFieldsStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = AddDocument((uintptr_t)nodePtr, (char*)jsonC, isEncrypted, (char*)encryptedFieldsC, opts, (uintptr_t)identityPtr);
+    if (jsonStr) (*env)->ReleaseStringUTFChars(env, jsonStr, jsonC);
+    if (encryptedFieldsStr) (*env)->ReleaseStringUTFChars(env, encryptedFieldsStr, encryptedFieldsC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DeleteDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jstring filterStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = DeleteDocument((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_GetDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jboolean showDeleted,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    int showDeletedC = (showDeleted == JNI_TRUE) ? 1 : 0;
+    Result res = GetDocument((uintptr_t)nodePtr, (char*)docIDC, showDeletedC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_UpdateDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jstring filterStr,
+    jstring updaterStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
+    const char* updaterC = updaterStr ? (*env)->GetStringUTFChars(env, updaterStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = UpdateDocument((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, (char*)updaterC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
+    if (updaterStr) (*env)->ReleaseStringUTFChars(env, updaterStr, updaterC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_NewEncryptedIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionNameStr,
+    jstring fieldNameStr,
+    jlong identityPtr
+) {
+    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
+    const char* fieldNameC = fieldNameStr ? (*env)->GetStringUTFChars(env, fieldNameStr, NULL) : NULL;
+    Result res = NewEncryptedIndex((uintptr_t)nodePtr, (char*)collectionNameC, (char*)fieldNameC, (uintptr_t)identityPtr);
+    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    if (fieldNameStr) (*env)->ReleaseStringUTFChars(env, fieldNameStr, fieldNameC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListEncryptedIndexesNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionNameStr,
+    jlong identityPtr
+) {
+    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
+    Result res = ListEncryptedIndexes((uintptr_t)nodePtr, (char*)collectionNameC, (uintptr_t)identityPtr);
+    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DeleteEncryptedIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionNameStr,
+    jstring fieldNameStr,
+    jlong identityPtr
+) {
+    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
+    const char* fieldNameC = fieldNameStr ? (*env)->GetStringUTFChars(env, fieldNameStr, NULL) : NULL;
+    Result res = DeleteEncryptedIndex((uintptr_t)nodePtr, (char*)collectionNameC, (char*)fieldNameC, (uintptr_t)identityPtr);
+    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    if (fieldNameStr) (*env)->ReleaseStringUTFChars(env, fieldNameStr, fieldNameC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_NewIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring indexNameStr,
+    jstring fieldsStr,
+    jboolean isUnique,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
+    const char* fieldsC = fieldsStr ? (*env)->GetStringUTFChars(env, fieldsStr, NULL) : NULL;
+    int isUniqueC = (isUnique == JNI_TRUE) ? 1 : 0;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = NewIndex((uintptr_t)nodePtr, (char*)indexNameC, (char*)fieldsC, isUniqueC, opts, (uintptr_t)identityPtr);
+    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    if (fieldsStr) (*env)->ReleaseStringUTFChars(env, fieldsStr, fieldsC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListIndexesNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = ListIndexes((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DeleteIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring indexNameStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = DeleteIndex((uintptr_t)nodePtr, (char*)indexNameC, opts, (uintptr_t)identityPtr);
+    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
     return returnDefraResult(env, res);
 }
 
@@ -442,64 +526,284 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_IdentityNewNative(
     jstring keyTypeStr
 ) {
     const char* keyTypeC = keyTypeStr ? (*env)->GetStringUTFChars(env, keyTypeStr, NULL) : NULL;
-    NewIdentityResult res = IdentityNew((char*)keyTypeC);
+    NewIdentityResult res = NewIdentity((char*)keyTypeC);
     if (keyTypeStr) (*env)->ReleaseStringUTFChars(env, keyTypeStr, keyTypeC);
     return returnDefraIdentityResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_NodeIdentityNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_GetNodeIdentityNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr
 ) {
-    Result res = NodeIdentity((uintptr_t)nodePtr);
+    Result res = GetNodeIdentity((uintptr_t)nodePtr);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_IndexCreateNative(
+JNIEXPORT void JNICALL Java_source_defra_DefraNode_FreeIdentityNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong identityPtr
+) {
+    FreeIdentity((uintptr_t)identityPtr);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_SetLensNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring collectionNameStr,
-    jstring indexNameStr,
-    jstring fieldsStr,
-    jboolean isUnique
+    jlong identityPtr,
+    jstring srcStr,
+    jstring dstStr,
+    jstring cfgStr
 ) {
-    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
-    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
-    const char* fieldsC = fieldsStr ? (*env)->GetStringUTFChars(env, fieldsStr, NULL) : NULL;
-    int isUniqueC = (isUnique == JNI_TRUE) ? 1 : 0;
-    Result res = IndexCreate((uintptr_t)nodePtr, (char*)collectionNameC, (char*)indexNameC, (char*)fieldsC, isUniqueC);
-    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
-    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
-    if (fieldsStr) (*env)->ReleaseStringUTFChars(env, fieldsStr, fieldsC);
+    const char* srcC = srcStr ? (*env)->GetStringUTFChars(env, srcStr, NULL) : NULL;
+    const char* dstC = dstStr ? (*env)->GetStringUTFChars(env, dstStr, NULL) : NULL;
+    const char* cfgC = cfgStr ? (*env)->GetStringUTFChars(env, cfgStr, NULL) : NULL;
+    Result res = SetLens((uintptr_t)nodePtr, (uintptr_t)identityPtr, (char*)srcC, (char*)dstC, (char*)cfgC);
+    if (srcStr) (*env)->ReleaseStringUTFChars(env, srcStr, srcC);
+    if (dstStr) (*env)->ReleaseStringUTFChars(env, dstStr, dstC);
+    if (cfgStr) (*env)->ReleaseStringUTFChars(env, cfgStr, cfgC);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_IndexListNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddLensNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring collectionNameStr
+    jlong identityPtr,
+    jstring cfgStr
 ) {
-    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
-    Result res = IndexList((uintptr_t)nodePtr, (char*)collectionNameC);
-    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    const char* cfgC = cfgStr ? (*env)->GetStringUTFChars(env, cfgStr, NULL) : NULL;
+    Result res = AddLens((uintptr_t)nodePtr, (uintptr_t)identityPtr, (char*)cfgC);
+    if (cfgStr) (*env)->ReleaseStringUTFChars(env, cfgStr, cfgC);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_IndexDropNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListLensesNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring collectionNameStr,
-    jstring indexNameStr
+    jlong identityPtr
 ) {
-    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
-    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
-    Result res = IndexDrop((uintptr_t)nodePtr, (char*)collectionNameC, (char*)indexNameC);
-    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
-    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    Result res = ListLenses((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_BlockVerifySignatureNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring keyTypeStr,
+    jstring publicKeyStr,
+    jstring cidStr,
+    jlong identityPtr
+) {
+    const char* keyTypeC = keyTypeStr ? (*env)->GetStringUTFChars(env, keyTypeStr, NULL) : NULL;
+    const char* publicKeyC = publicKeyStr ? (*env)->GetStringUTFChars(env, publicKeyStr, NULL) : NULL;
+    const char* cidC = cidStr ? (*env)->GetStringUTFChars(env, cidStr, NULL) : NULL;
+    Result res = VerifyBlockSignature((uintptr_t)nodePtr, (char*)keyTypeC, (char*)publicKeyC, (char*)cidC, (uintptr_t)identityPtr);
+    if (keyTypeStr) (*env)->ReleaseStringUTFChars(env, keyTypeStr, keyTypeC);
+    if (publicKeyStr) (*env)->ReleaseStringUTFChars(env, publicKeyStr, publicKeyC);
+    if (cidStr) (*env)->ReleaseStringUTFChars(env, cidStr, cidC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_GetP2PInfoNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = GetP2PInfo((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListP2PActivePeersNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = ListP2PActivePeers((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListP2PReplicatorsNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = ListP2PReplicators((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddP2PReplicatorNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jstring addressesStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    const char* addressesC = addressesStr ? (*env)->GetStringUTFChars(env, addressesStr, NULL) : NULL;
+    Result res = AddP2PReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)addressesC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    if (addressesStr) (*env)->ReleaseStringUTFChars(env, addressesStr, addressesC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DeleteP2PReplicatorNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jstring idStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    const char* idC = idStr ? (*env)->GetStringUTFChars(env, idStr, NULL) : NULL;
+    Result res = DeleteP2PReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)idC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    if (idStr) (*env)->ReleaseStringUTFChars(env, idStr, idC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddP2PCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    Result res = AddP2PCollection((uintptr_t)nodePtr, (char*)collectionsC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DeleteP2PCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    Result res = DeleteP2PCollection((uintptr_t)nodePtr, (char*)collectionsC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListP2PCollectionsNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = ListP2PCollections((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddP2PDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    Result res = AddP2PDocument((uintptr_t)nodePtr, (char*)collectionsC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_DeleteP2PDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    Result res = DeleteP2PDocument((uintptr_t)nodePtr, (char*)collectionsC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ListP2PDocumentsNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = ListP2PDocuments((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_SyncP2PDocumentsNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionStr,
+    jstring docIDsStr,
+    jstring timeoutStr,
+    jlong identityPtr
+) {
+    const char* collectionC = collectionStr ? (*env)->GetStringUTFChars(env, collectionStr, NULL) : NULL;
+    const char* docIDsC = docIDsStr ? (*env)->GetStringUTFChars(env, docIDsStr, NULL) : NULL;
+    const char* timeoutC = timeoutStr ? (*env)->GetStringUTFChars(env, timeoutStr, NULL) : NULL;
+    Result res = SyncP2PDocuments((uintptr_t)nodePtr, (char*)collectionC, (char*)docIDsC, (char*)timeoutC, (uintptr_t)identityPtr);
+    if (collectionStr) (*env)->ReleaseStringUTFChars(env, collectionStr, collectionC);
+    if (docIDsStr) (*env)->ReleaseStringUTFChars(env, docIDsStr, docIDsC);
+    if (timeoutStr) (*env)->ReleaseStringUTFChars(env, timeoutStr, timeoutC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_SyncP2PCollectionVersionsNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring versionIDsStr,
+    jstring timeoutStr,
+    jlong identityPtr
+) {
+    const char* versionIDsC = versionIDsStr ? (*env)->GetStringUTFChars(env, versionIDsStr, NULL) : NULL;
+    const char* timeoutC = timeoutStr ? (*env)->GetStringUTFChars(env, timeoutStr, NULL) : NULL;
+    Result res = SyncP2PCollectionVersions((uintptr_t)nodePtr, (char*)versionIDsC, (char*)timeoutC, (uintptr_t)identityPtr);
+    if (versionIDsStr) (*env)->ReleaseStringUTFChars(env, versionIDsStr, versionIDsC);
+    if (timeoutStr) (*env)->ReleaseStringUTFChars(env, timeoutStr, timeoutC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_SyncP2PBranchableCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionIDStr,
+    jstring timeoutStr,
+    jlong identityPtr
+) {
+    const char* collectionIDC = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, NULL) : NULL;
+    const char* timeoutC = timeoutStr ? (*env)->GetStringUTFChars(env, timeoutStr, NULL) : NULL;
+    Result res = SyncP2PBranchableCollection((uintptr_t)nodePtr, (char*)collectionIDC, (char*)timeoutC, (uintptr_t)identityPtr);
+    if (collectionIDStr) (*env)->ReleaseStringUTFChars(env, collectionIDStr, collectionIDC);
+    if (timeoutStr) (*env)->ReleaseStringUTFChars(env, timeoutStr, timeoutC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ConnectP2PPeersNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring peerAddressesStr,
+    jlong identityPtr
+) {
+    const char* peerAddressesC = peerAddressesStr ? (*env)->GetStringUTFChars(env, peerAddressesStr, NULL) : NULL;
+    Result res = ConnectP2PPeers((uintptr_t)nodePtr, (char*)peerAddressesC, (uintptr_t)identityPtr);
+    if (peerAddressesStr) (*env)->ReleaseStringUTFChars(env, peerAddressesStr, peerAddressesC);
     return returnDefraResult(env, res);
 }
 
@@ -544,7 +848,7 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_CloseSubscriptionNative(
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_VersionGetNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_GetVersionNative(
     JNIEnv* env,
     jobject thiz,
     jboolean flagFull,
@@ -552,268 +856,47 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_VersionGetNative(
 ) {
     int flagFullC = (flagFull == JNI_TRUE) ? 1 : 0;
     int flagJSONC = (flagJSON == JNI_TRUE) ? 1 : 0;
-    Result res = VersionGet(flagFullC, flagJSONC);
+    Result res = GetVersion(flagFullC, flagJSONC);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ViewAddNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_AddViewNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
     jstring queryStr,
     jstring sdlStr,
-    jstring transformStr
+    jstring transformCIDStr,
+    jlong identityPtr
 ) {
     const char* queryC = queryStr ? (*env)->GetStringUTFChars(env, queryStr, NULL) : NULL;
     const char* sdlC = sdlStr ? (*env)->GetStringUTFChars(env, sdlStr, NULL) : NULL;
-    const char* transformC = transformStr ? (*env)->GetStringUTFChars(env, transformStr, NULL) : NULL;
+    const char* transformCIDC = transformCIDStr ? (*env)->GetStringUTFChars(env, transformCIDStr, NULL) : NULL;
+    Result res = AddView((uintptr_t)nodePtr, (char*)queryC, (char*)sdlC, (char*)transformCIDC, (uintptr_t)identityPtr);
     if (queryStr) (*env)->ReleaseStringUTFChars(env, queryStr, queryC);
     if (sdlStr) (*env)->ReleaseStringUTFChars(env, sdlStr, sdlC);
-    if (transformStr) (*env)->ReleaseStringUTFChars(env, transformStr, transformC);
-    Result res = ViewAdd((uintptr_t)nodePtr, (char*)queryC, (char*)sdlC, (char*)transformC);
+    if (transformCIDStr) (*env)->ReleaseStringUTFChars(env, transformCIDStr, transformCIDC);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_ViewRefreshNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_RefreshViewNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring viewNameStr,
-    jstring collectionIDStr,
-    jstring versionIDStr,
-    jboolean getInactive
+    jobject optionsObj,
+    jlong identityPtr
 ) {
-    const char* viewNameC = viewNameStr ? (*env)->GetStringUTFChars(env, viewNameStr, NULL) : NULL;
-    const char* collectionIDC = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, NULL) : NULL;
-    const char* versionIDC = versionIDStr ? (*env)->GetStringUTFChars(env, versionIDStr, NULL) : NULL;
-    int getInactiveC = (getInactive == JNI_TRUE) ? 1 : 0;
-    Result res = ViewRefresh((uintptr_t)nodePtr, (char*)viewNameC, (char*)collectionIDC, (char*)versionIDC, getInactiveC);
-    if (viewNameStr) (*env)->ReleaseStringUTFChars(env, viewNameStr, viewNameC);
-    if (collectionIDStr) (*env)->ReleaseStringUTFChars(env, collectionIDStr, collectionIDC);
-    if (versionIDStr) (*env)->ReleaseStringUTFChars(env, versionIDStr, versionIDC);
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = RefreshView((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_LensSetNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring srcStr,
-    jstring dstStr,
-    jstring cfgStr
-) {
-    const char* srcC = srcStr ? (*env)->GetStringUTFChars(env, srcStr, NULL) : NULL;
-    const char* dstC = dstStr ? (*env)->GetStringUTFChars(env, dstStr, NULL) : NULL;
-    const char* cfgC = cfgStr ? (*env)->GetStringUTFChars(env, cfgStr, NULL) : NULL;
-    Result res = LensSet((uintptr_t)nodePtr, (char*)srcC, (char*)dstC, (char*)cfgC);
-    if (dstStr) (*env)->ReleaseStringUTFChars(env, dstStr, dstC);
-    if (cfgStr) (*env)->ReleaseStringUTFChars(env, cfgStr, cfgC);
-    if (srcStr) (*env)->ReleaseStringUTFChars(env, srcStr, srcC);
-    return returnDefraResult(env, res);
-}
+//=============================================================================
+// Transaction JNI Functions
+//=============================================================================
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_LensDownNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionIDStr,
-    jstring documentsStr
-) {
-    const char* collectionIDC = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, NULL) : NULL;
-    const char* documentsC = documentsStr ? (*env)->GetStringUTFChars(env, documentsStr, NULL) : NULL;
-    Result res = LensDown((uintptr_t)nodePtr, (char*)collectionIDC, (char*)documentsC);
-    if (collectionIDStr) (*env)->ReleaseStringUTFChars(env, collectionIDStr, collectionIDC);
-    if (documentsStr) (*env)->ReleaseStringUTFChars(env, documentsStr, documentsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_LensUpNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionIDStr,
-    jstring documentsStr
-) {
-    const char* collectionIDC = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, NULL) : NULL;
-    const char* documentsC = documentsStr ? (*env)->GetStringUTFChars(env, documentsStr, NULL) : NULL;
-    Result res = LensUp((uintptr_t)nodePtr, (char*)collectionIDC, (char*)documentsC);
-    if (collectionIDStr) (*env)->ReleaseStringUTFChars(env, collectionIDStr, collectionIDC);
-    if (documentsStr) (*env)->ReleaseStringUTFChars(env, documentsStr, documentsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_LensReloadNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = LensReload((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_LensSetRegistryNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionIDStr,
-    jstring cfgStr
-) {
-    const char* collectionIDC = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, NULL) : NULL;
-    const char* cfgC = cfgStr ? (*env)->GetStringUTFChars(env, cfgStr, NULL) : NULL;
-    Result res = LensSetRegistry((uintptr_t)nodePtr, (char*)collectionIDC, (char*)cfgC);
-    if (collectionIDStr) (*env)->ReleaseStringUTFChars(env, collectionIDStr, collectionIDC);
-    if (cfgStr) (*env)->ReleaseStringUTFChars(env, cfgStr, cfgC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PInfoNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PInfo((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PgetAllReplicatorsNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PgetAllReplicators((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PsetReplicatorNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr,
-    jstring peerInfoStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    const char* peerInfoC = peerInfoStr ? (*env)->GetStringUTFChars(env, peerInfoStr, NULL) : NULL;
-    Result res = P2PsetReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)peerInfoC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    if (peerInfoStr) (*env)->ReleaseStringUTFChars(env, peerInfoStr, peerInfoC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PdeleteReplicatorNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr,
-    jstring peerInfoStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    const char* peerInfoC = peerInfoStr ? (*env)->GetStringUTFChars(env, peerInfoStr, NULL) : NULL;
-    Result res = P2PdeleteReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)peerInfoC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    if (peerInfoStr) (*env)->ReleaseStringUTFChars(env, peerInfoStr, peerInfoC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PcollectionAddNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PcollectionAdd((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PcollectionRemoveNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PcollectionRemove((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PcollectionGetAllNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PcollectionGetAll((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PdocumentAddNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PdocumentAdd((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PdocumentRemoveNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PdocumentRemove((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PdocumentGetAllNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PdocumentGetAll((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PdocumentSyncNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionStr,
-    jstring docIDsStr,
-    jstring timeoutStr
-) {
-    const char* collectionC = collectionStr ? (*env)->GetStringUTFChars(env, collectionStr, NULL) : NULL;
-    const char* docIDsC = docIDsStr ? (*env)->GetStringUTFChars(env, docIDsStr, NULL) : NULL;
-    const char* timeoutC = timeoutStr ? (*env)->GetStringUTFChars(env, timeoutStr, NULL) : NULL;
-    Result res = P2PdocumentSync((uintptr_t)nodePtr, (char*)collectionC, (char*)docIDsC, (char*)timeoutC);
-    if (collectionStr) (*env)->ReleaseStringUTFChars(env, collectionStr, collectionC);
-    if (docIDsStr) (*env)->ReleaseStringUTFChars(env, docIDsStr, docIDsC);
-    if (timeoutStr) (*env)->ReleaseStringUTFChars(env, timeoutStr, timeoutC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_P2PconnectNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring peerIDStr,
-    jstring peerAddressesStr
-) {
-    const char* peerIDC = peerIDStr ? (*env)->GetStringUTFChars(env, peerIDStr, NULL) : NULL;
-    const char* peerAddressesC = peerAddressesStr ? (*env)->GetStringUTFChars(env, peerAddressesStr, NULL) : NULL;
-    Result res = P2Pconnect((uintptr_t)nodePtr, (char*)peerIDC, (char*)peerAddressesC);
-    if (peerIDStr) (*env)->ReleaseStringUTFChars(env, peerIDStr, peerIDC);
-    if (peerAddressesStr) (*env)->ReleaseStringUTFChars(env, peerAddressesStr, peerAddressesC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_TransactionCreateNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_TransactionCreateNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
@@ -822,7 +905,7 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraNode_TransactionCreateNative(
 ) {
     int isConcurrentC = (isConcurrent == JNI_TRUE) ? 1 : 0;
     int isReadOnlyC = (isReadOnly == JNI_TRUE) ? 1 : 0;
-    NewTxnResult res = TransactionCreate((uintptr_t)nodePtr, isConcurrentC, isReadOnlyC);
+    NewTxnResult res = CreateTransaction((uintptr_t)nodePtr, isConcurrentC, isReadOnlyC);
     return returnDefraTransactionResult(env, res);
 }
 
@@ -831,7 +914,7 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_TransactionCommitNa
     jobject thiz,
     jlong txnPtr
 ) {
-    Result res = TransactionCommit((uintptr_t)txnPtr);
+    Result res = CommitTransaction((uintptr_t)txnPtr);
     return returnDefraResult(env, res);
 }
 
@@ -840,11 +923,10 @@ JNIEXPORT void JNICALL Java_source_defra_DefraTransaction_TransactionDiscardNati
     jobject thiz,
     jlong txnPtr
 ) {
-    TransactionDiscard((uintptr_t)txnPtr);
+    DiscardTransaction((uintptr_t)txnPtr);
 }
 
-// Transaction JNI Methods
-
+// Transaction ACP Methods
 JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ACPAddDACPolicyNative(
     JNIEnv* env,
     jobject thiz,
@@ -964,306 +1046,188 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ACPGetNACStatusNati
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PInfoNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PInfo((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PgetAllReplicatorsNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PgetAllReplicators((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PsetReplicatorNative(
+// Transaction Document Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_AddDocumentNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring collectionsStr,
-    jstring peerInfoStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    const char* peerInfoC = peerInfoStr ? (*env)->GetStringUTFChars(env, peerInfoStr, NULL) : NULL;
-    Result res = P2PsetReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)peerInfoC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    if (peerInfoStr) (*env)->ReleaseStringUTFChars(env, peerInfoStr, peerInfoC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PdeleteReplicatorNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr,
-    jstring peerInfoStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    const char* peerInfoC = peerInfoStr ? (*env)->GetStringUTFChars(env, peerInfoStr, NULL) : NULL;
-    Result res = P2PdeleteReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)peerInfoC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    if (peerInfoStr) (*env)->ReleaseStringUTFChars(env, peerInfoStr, peerInfoC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PcollectionAddNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PcollectionAdd((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PcollectionRemoveNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PcollectionRemove((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PcollectionGetAllNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PcollectionGetAll((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PdocumentAddNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PdocumentAdd((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PdocumentRemoveNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionsStr
-) {
-    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
-    Result res = P2PdocumentRemove((uintptr_t)nodePtr, (char*)collectionsC);
-    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PdocumentGetAllNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = P2PdocumentGetAll((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PdocumentSyncNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring collectionStr,
-    jstring docIDsStr,
-    jstring timeoutStr
-) {
-    const char* collectionC = collectionStr ? (*env)->GetStringUTFChars(env, collectionStr, NULL) : NULL;
-    const char* docIDsC = docIDsStr ? (*env)->GetStringUTFChars(env, docIDsStr, NULL) : NULL;
-    const char* timeoutC = timeoutStr ? (*env)->GetStringUTFChars(env, timeoutStr, NULL) : NULL;
-    Result res = P2PdocumentSync((uintptr_t)nodePtr, (char*)collectionC, (char*)docIDsC, (char*)timeoutC);
-    if (collectionStr) (*env)->ReleaseStringUTFChars(env, collectionStr, collectionC);
-    if (docIDsStr) (*env)->ReleaseStringUTFChars(env, docIDsStr, docIDsC);
-    if (timeoutStr) (*env)->ReleaseStringUTFChars(env, timeoutStr, timeoutC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_P2PconnectNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring peerIDStr,
-    jstring peerAddressesStr
-) {
-    const char* peerIDC = peerIDStr ? (*env)->GetStringUTFChars(env, peerIDStr, NULL) : NULL;
-    const char* peerAddressesC = peerAddressesStr ? (*env)->GetStringUTFChars(env, peerAddressesStr, NULL) : NULL;
-    Result res = P2Pconnect((uintptr_t)nodePtr, (char*)peerIDC, (char*)peerAddressesC);
-    if (peerIDStr) (*env)->ReleaseStringUTFChars(env, peerIDStr, peerIDC);
-    if (peerAddressesStr) (*env)->ReleaseStringUTFChars(env, peerAddressesStr, peerAddressesC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_NodeIdentityNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr
-) {
-    Result res = NodeIdentity((uintptr_t)nodePtr);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_BlockVerifySignatureNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring keyTypeStr,
-    jstring publicKeyStr,
-    jstring cidStr
-) {
-    const char* keyTypeC = keyTypeStr ? (*env)->GetStringUTFChars(env, keyTypeStr, NULL) : NULL;
-    const char* publicKeyC = publicKeyStr ? (*env)->GetStringUTFChars(env, publicKeyStr, NULL) : NULL;
-    const char* cidC = cidStr ? (*env)->GetStringUTFChars(env, cidStr, NULL) : NULL;
-    Result res = BlockVerifySignature((uintptr_t)nodePtr, (char*)keyTypeC, (char*)publicKeyC, (char*)cidC);
-    if (keyTypeStr) (*env)->ReleaseStringUTFChars(env, keyTypeStr, keyTypeC);
-    if (publicKeyStr) (*env)->ReleaseStringUTFChars(env, publicKeyStr, publicKeyC);
-    if (cidStr) (*env)->ReleaseStringUTFChars(env, cidStr, cidC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_AddSchemaNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring schemaStr,
+    jstring jsonStr,
+    jint isEncrypted,
+    jstring encryptedFieldsStr,
+    jobject optionsObj,
     jlong identityPtr
 ) {
-    const char* schemaC = schemaStr ? (*env)->GetStringUTFChars(env, schemaStr, NULL) : NULL;
-    Result res = AddSchema((uintptr_t)nodePtr, (char*)schemaC, (uintptr_t)identityPtr);
-    if (schemaStr) (*env)->ReleaseStringUTFChars(env, schemaStr, schemaC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_CollectionPatchNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring patchStr,
-    jstring lensConfigStr,
-    jobject optionsObj
-) {
-    const char* patchC = patchStr ? (*env)->GetStringUTFChars(env, patchStr, NULL) : NULL;
-    const char* lensConfigC = lensConfigStr ? (*env)->GetStringUTFChars(env, lensConfigStr, NULL) : NULL;
+    const char* jsonC = jsonStr ? (*env)->GetStringUTFChars(env, jsonStr, NULL) : NULL;
+    const char* encryptedFieldsC = encryptedFieldsStr ? (*env)->GetStringUTFChars(env, encryptedFieldsStr, NULL) : NULL;
     CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
-    Result res = CollectionPatch((uintptr_t)nodePtr, (char*)patchC, (char*)lensConfigC, opts);
-    if (patchStr) (*env)->ReleaseStringUTFChars(env, patchStr, patchC);
-    if (lensConfigStr) (*env)->ReleaseStringUTFChars(env, lensConfigStr, lensConfigC);
+    Result res = AddDocument((uintptr_t)nodePtr, (char*)jsonC, isEncrypted, (char*)encryptedFieldsC, opts, (uintptr_t)identityPtr);
+    if (jsonStr) (*env)->ReleaseStringUTFChars(env, jsonStr, jsonC);
+    if (encryptedFieldsStr) (*env)->ReleaseStringUTFChars(env, encryptedFieldsStr, encryptedFieldsC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_SetActiveCollectionNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring versionStr
-) {
-    const char* versionC = versionStr ? (*env)->GetStringUTFChars(env, versionStr, NULL) : NULL;
-    Result res = SetActiveCollection((uintptr_t)nodePtr, (char*)versionC);
-    if (versionStr) (*env)->ReleaseStringUTFChars(env, versionStr, versionC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ViewAddNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring queryStr,
-    jstring sdlStr,
-    jstring transformStr
-) {
-    const char* queryC = queryStr ? (*env)->GetStringUTFChars(env, queryStr, NULL) : NULL;
-    const char* sdlC = sdlStr ? (*env)->GetStringUTFChars(env, sdlStr, NULL) : NULL;
-    const char* transformC = transformStr ? (*env)->GetStringUTFChars(env, transformStr, NULL) : NULL;
-    if (queryStr) (*env)->ReleaseStringUTFChars(env, queryStr, queryC);
-    if (sdlStr) (*env)->ReleaseStringUTFChars(env, sdlStr, sdlC);
-    if (transformStr) (*env)->ReleaseStringUTFChars(env, transformStr, transformC);
-    Result res = ViewAdd((uintptr_t)nodePtr, (char*)queryC, (char*)sdlC, (char*)transformC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ViewRefreshNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring viewNameStr,
-    jstring collectionIDStr,
-    jstring versionIDStr,
-    jboolean getInactive
-) {
-    const char* viewNameC = viewNameStr ? (*env)->GetStringUTFChars(env, viewNameStr, NULL) : NULL;
-    const char* collectionIDC = collectionIDStr ? (*env)->GetStringUTFChars(env, collectionIDStr, NULL) : NULL;
-    const char* versionIDC = versionIDStr ? (*env)->GetStringUTFChars(env, versionIDStr, NULL) : NULL;
-    int getInactiveC = (getInactive == JNI_TRUE) ? 1 : 0;
-    Result res = ViewRefresh((uintptr_t)nodePtr, (char*)viewNameC, (char*)collectionIDC, (char*)versionIDC, getInactiveC);
-    if (viewNameStr) (*env)->ReleaseStringUTFChars(env, viewNameStr, viewNameC);
-    if (collectionIDStr) (*env)->ReleaseStringUTFChars(env, collectionIDStr, collectionIDC);
-    if (versionIDStr) (*env)->ReleaseStringUTFChars(env, versionIDStr, versionIDC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_LensSetNative(
-    JNIEnv* env,
-    jobject thiz,
-    jlong nodePtr,
-    jstring srcStr,
-    jstring dstStr,
-    jstring cfgStr
-) {
-    const char* srcC = srcStr ? (*env)->GetStringUTFChars(env, srcStr, NULL) : NULL;
-    const char* dstC = dstStr ? (*env)->GetStringUTFChars(env, dstStr, NULL) : NULL;
-    const char* cfgC = cfgStr ? (*env)->GetStringUTFChars(env, cfgStr, NULL) : NULL;
-    Result res = LensSet((uintptr_t)nodePtr, (char*)srcC, (char*)dstC, (char*)cfgC);
-    if (dstStr) (*env)->ReleaseStringUTFChars(env, dstStr, dstC);
-    if (cfgStr) (*env)->ReleaseStringUTFChars(env, cfgStr, cfgC);
-    if (srcStr) (*env)->ReleaseStringUTFChars(env, srcStr, srcC);
-    return returnDefraResult(env, res);
-}
-
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_CollectionGetNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_GetDocumentNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
     jstring docIDStr,
     jboolean showDeleted,
-    jobject optionsObj
+    jobject optionsObj,
+    jlong identityPtr
 ) {
     const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
     CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
     int showDeletedC = (showDeleted == JNI_TRUE) ? 1 : 0;
-    Result res = CollectionGet((uintptr_t)nodePtr, (char*)docIDC, showDeletedC, opts);
+    Result res = GetDocument((uintptr_t)nodePtr, (char*)docIDC, showDeletedC, opts, (uintptr_t)identityPtr);
     if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
     return returnDefraResult(env, res);
 }
 
-JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_IndexListNative(
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_UpdateDocumentNative(
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jstring collectionNameStr
+    jstring docIDStr,
+    jstring filterStr,
+    jstring updaterStr,
+    jobject optionsObj,
+    jlong identityPtr
 ) {
-    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
-    Result res = IndexList((uintptr_t)nodePtr, (char*)collectionNameC);
-    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
+    const char* updaterC = updaterStr ? (*env)->GetStringUTFChars(env, updaterStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = UpdateDocument((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, (char*)updaterC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
+    if (updaterStr) (*env)->ReleaseStringUTFChars(env, updaterStr, updaterC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
     return returnDefraResult(env, res);
 }
 
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_DeleteDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jstring filterStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = DeleteDocument((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+// Transaction Index Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_NewIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring indexNameStr,
+    jstring fieldsStr,
+    jboolean isUnique,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
+    const char* fieldsC = fieldsStr ? (*env)->GetStringUTFChars(env, fieldsStr, NULL) : NULL;
+    int isUniqueC = (isUnique == JNI_TRUE) ? 1 : 0;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = NewIndex((uintptr_t)nodePtr, (char*)indexNameC, (char*)fieldsC, isUniqueC, opts, (uintptr_t)identityPtr);
+    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    if (fieldsStr) (*env)->ReleaseStringUTFChars(env, fieldsStr, fieldsC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ListIndexesNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = ListIndexes((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_DeleteIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring indexNameStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = DeleteIndex((uintptr_t)nodePtr, (char*)indexNameC, opts, (uintptr_t)identityPtr);
+    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+// Transaction P2P Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_GetP2PInfoNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = GetP2PInfo((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ListP2PReplicatorsNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jlong identityPtr
+) {
+    Result res = ListP2PReplicators((uintptr_t)nodePtr, (uintptr_t)identityPtr);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_AddP2PReplicatorNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionsStr,
+    jstring addressesStr,
+    jlong identityPtr
+) {
+    const char* collectionsC = collectionsStr ? (*env)->GetStringUTFChars(env, collectionsStr, NULL) : NULL;
+    const char* addressesC = addressesStr ? (*env)->GetStringUTFChars(env, addressesStr, NULL) : NULL;
+    Result res = AddP2PReplicator((uintptr_t)nodePtr, (char*)collectionsC, (char*)addressesC, (uintptr_t)identityPtr);
+    if (collectionsStr) (*env)->ReleaseStringUTFChars(env, collectionsStr, collectionsC);
+    if (addressesStr) (*env)->ReleaseStringUTFChars(env, addressesStr, addressesC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ConnectP2PPeersNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring peerAddressesStr,
+    jlong identityPtr
+) {
+    const char* peerAddressesC = peerAddressesStr ? (*env)->GetStringUTFChars(env, peerAddressesStr, NULL) : NULL;
+    Result res = ConnectP2PPeers((uintptr_t)nodePtr, (char*)peerAddressesC, (uintptr_t)identityPtr);
+    if (peerAddressesStr) (*env)->ReleaseStringUTFChars(env, peerAddressesStr, peerAddressesC);
+    return returnDefraResult(env, res);
+}
+
+// Transaction Query Methods
 JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ExecuteQueryNative(
     JNIEnv* env,
     jobject thiz,
@@ -1281,4 +1245,295 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_ExecuteQueryNative(
     if (operationNameStr) (*env)->ReleaseStringUTFChars(env, operationNameStr, operationNameC);
     if (variablesStr) (*env)->ReleaseStringUTFChars(env, variablesStr, variablesC);
     return returnDefraResult(env, res);
+}
+
+// Transaction Collection Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_AddCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring sdlStr,
+    jlong identityPtr
+) {
+    const char* sdlC = sdlStr ? (*env)->GetStringUTFChars(env, sdlStr, NULL) : NULL;
+    Result res = AddCollection((uintptr_t)nodePtr, (char*)sdlC, (uintptr_t)identityPtr);
+    if (sdlStr) (*env)->ReleaseStringUTFChars(env, sdlStr, sdlC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_PatchCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring patchStr,
+    jstring lensConfigStr,
+    jlong identityPtr
+) {
+    const char* patchC = patchStr ? (*env)->GetStringUTFChars(env, patchStr, NULL) : NULL;
+    const char* lensConfigC = lensConfigStr ? (*env)->GetStringUTFChars(env, lensConfigStr, NULL) : NULL;
+    Result res = PatchCollection((uintptr_t)nodePtr, (char*)patchC, (char*)lensConfigC, (uintptr_t)identityPtr);
+    if (patchStr) (*env)->ReleaseStringUTFChars(env, patchStr, patchC);
+    if (lensConfigStr) (*env)->ReleaseStringUTFChars(env, lensConfigStr, lensConfigC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_SetActiveCollectionNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = SetActiveCollection((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+// Transaction View Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_AddViewNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring queryStr,
+    jstring sdlStr,
+    jstring transformCIDStr,
+    jlong identityPtr
+) {
+    const char* queryC = queryStr ? (*env)->GetStringUTFChars(env, queryStr, NULL) : NULL;
+    const char* sdlC = sdlStr ? (*env)->GetStringUTFChars(env, sdlStr, NULL) : NULL;
+    const char* transformCIDC = transformCIDStr ? (*env)->GetStringUTFChars(env, transformCIDStr, NULL) : NULL;
+    Result res = AddView((uintptr_t)nodePtr, (char*)queryC, (char*)sdlC, (char*)transformCIDC, (uintptr_t)identityPtr);
+    if (queryStr) (*env)->ReleaseStringUTFChars(env, queryStr, queryC);
+    if (sdlStr) (*env)->ReleaseStringUTFChars(env, sdlStr, sdlC);
+    if (transformCIDStr) (*env)->ReleaseStringUTFChars(env, transformCIDStr, transformCIDC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_RefreshViewNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = RefreshView((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+//=============================================================================
+// DefraCollection JNI Functions
+//=============================================================================
+
+// Document Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_AddDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring jsonStr,
+    jint isEncrypted,
+    jstring encryptedFieldsStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* jsonC = jsonStr ? (*env)->GetStringUTFChars(env, jsonStr, NULL) : NULL;
+    const char* encryptedFieldsC = encryptedFieldsStr ? (*env)->GetStringUTFChars(env, encryptedFieldsStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = AddDocument((uintptr_t)nodePtr, (char*)jsonC, isEncrypted, (char*)encryptedFieldsC, opts, (uintptr_t)identityPtr);
+    if (jsonStr) (*env)->ReleaseStringUTFChars(env, jsonStr, jsonC);
+    if (encryptedFieldsStr) (*env)->ReleaseStringUTFChars(env, encryptedFieldsStr, encryptedFieldsC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_DeleteDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jstring filterStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = DeleteDocument((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_GetDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jboolean showDeleted,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    int showDeletedC = (showDeleted == JNI_TRUE) ? 1 : 0;
+    Result res = GetDocument((uintptr_t)nodePtr, (char*)docIDC, showDeletedC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_UpdateDocumentNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring docIDStr,
+    jstring filterStr,
+    jstring updaterStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* docIDC = docIDStr ? (*env)->GetStringUTFChars(env, docIDStr, NULL) : NULL;
+    const char* filterC = filterStr ? (*env)->GetStringUTFChars(env, filterStr, NULL) : NULL;
+    const char* updaterC = updaterStr ? (*env)->GetStringUTFChars(env, updaterStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = UpdateDocument((uintptr_t)nodePtr, (char*)docIDC, (char*)filterC, (char*)updaterC, opts, (uintptr_t)identityPtr);
+    if (docIDStr) (*env)->ReleaseStringUTFChars(env, docIDStr, docIDC);
+    if (filterStr) (*env)->ReleaseStringUTFChars(env, filterStr, filterC);
+    if (updaterStr) (*env)->ReleaseStringUTFChars(env, updaterStr, updaterC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+// Encrypted Index Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_NewEncryptedIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionNameStr,
+    jstring fieldNameStr,
+    jlong identityPtr
+) {
+    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
+    const char* fieldNameC = fieldNameStr ? (*env)->GetStringUTFChars(env, fieldNameStr, NULL) : NULL;
+    Result res = NewEncryptedIndex((uintptr_t)nodePtr, (char*)collectionNameC, (char*)fieldNameC, (uintptr_t)identityPtr);
+    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    if (fieldNameStr) (*env)->ReleaseStringUTFChars(env, fieldNameStr, fieldNameC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_ListEncryptedIndexesNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionNameStr,
+    jlong identityPtr
+) {
+    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
+    Result res = ListEncryptedIndexes((uintptr_t)nodePtr, (char*)collectionNameC, (uintptr_t)identityPtr);
+    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_DeleteEncryptedIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring collectionNameStr,
+    jstring fieldNameStr,
+    jlong identityPtr
+) {
+    const char* collectionNameC = collectionNameStr ? (*env)->GetStringUTFChars(env, collectionNameStr, NULL) : NULL;
+    const char* fieldNameC = fieldNameStr ? (*env)->GetStringUTFChars(env, fieldNameStr, NULL) : NULL;
+    Result res = DeleteEncryptedIndex((uintptr_t)nodePtr, (char*)collectionNameC, (char*)fieldNameC, (uintptr_t)identityPtr);
+    if (collectionNameStr) (*env)->ReleaseStringUTFChars(env, collectionNameStr, collectionNameC);
+    if (fieldNameStr) (*env)->ReleaseStringUTFChars(env, fieldNameStr, fieldNameC);
+    return returnDefraResult(env, res);
+}
+
+// Index Methods
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_NewIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring indexNameStr,
+    jstring fieldsStr,
+    jboolean isUnique,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
+    const char* fieldsC = fieldsStr ? (*env)->GetStringUTFChars(env, fieldsStr, NULL) : NULL;
+    int isUniqueC = (isUnique == JNI_TRUE) ? 1 : 0;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = NewIndex((uintptr_t)nodePtr, (char*)indexNameC, (char*)fieldsC, isUniqueC, opts, (uintptr_t)identityPtr);
+    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    if (fieldsStr) (*env)->ReleaseStringUTFChars(env, fieldsStr, fieldsC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_ListIndexesNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = ListIndexes((uintptr_t)nodePtr, opts, (uintptr_t)identityPtr);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_DeleteIndexNative(
+    JNIEnv* env,
+    jobject thiz,
+    jlong nodePtr,
+    jstring indexNameStr,
+    jobject optionsObj,
+    jlong identityPtr
+) {
+    const char* indexNameC = indexNameStr ? (*env)->GetStringUTFChars(env, indexNameStr, NULL) : NULL;
+    CollectionOptions opts = convertJavaCollectionOptions(env, optionsObj);
+    Result res = DeleteIndex((uintptr_t)nodePtr, (char*)indexNameC, opts, (uintptr_t)identityPtr);
+    if (indexNameStr) (*env)->ReleaseStringUTFChars(env, indexNameStr, indexNameC);
+    releaseJavaCollectionOptions(env, optionsObj, opts);
+    return returnDefraResult(env, res);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_source_defra_DefraBLE_handleFoundPeer(JNIEnv *env, jclass clazz, jstring remotePID) {
+    const char *pid = (*env)->GetStringUTFChars(env, remotePID, NULL);
+    int result = BLEHandleFoundPeer((char*)pid);
+    (*env)->ReleaseStringUTFChars(env, remotePID, pid);
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_source_defra_DefraBLE_handleLostPeer(JNIEnv *env, jclass clazz, jstring remotePID) {
+    const char *pid = (*env)->GetStringUTFChars(env, remotePID, NULL);
+    BLEHandleLostPeer((char*)pid);
+    (*env)->ReleaseStringUTFChars(env, remotePID, pid);
+}
+
+JNIEXPORT void JNICALL
+Java_source_defra_DefraBLE_receiveFromPeer(JNIEnv *env, jclass clazz, jstring remotePID, jbyteArray payload) {
+    const char *pid = (*env)->GetStringUTFChars(env, remotePID, NULL);
+    jsize len = (*env)->GetArrayLength(env, payload);
+    jbyte *bytes = (*env)->GetByteArrayElements(env, payload, NULL);
+    BLEReceiveFromPeer((char*)pid, (void*)bytes, (int)len);
+    (*env)->ReleaseByteArrayElements(env, payload, bytes, JNI_ABORT);
+    (*env)->ReleaseStringUTFChars(env, remotePID, pid);
+}
+
+JavaVM* gJVM = NULL;
+jobject gBleInterface = NULL;
+
+JNIEXPORT void JNICALL
+Java_source_defra_DefraBLE_registerBleInterface(JNIEnv *env, jclass clazz, jobject bleInterface) {
+    (*env)->GetJavaVM(env, &gJVM);
+    gBleInterface = (*env)->NewGlobalRef(env, bleInterface);
 }
