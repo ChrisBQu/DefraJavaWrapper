@@ -911,12 +911,10 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraTransaction_TransactionCreateNa
     JNIEnv* env,
     jobject thiz,
     jlong nodePtr,
-    jboolean isConcurrent,
     jboolean isReadOnly
 ) {
-    int isConcurrentC = (isConcurrent == JNI_TRUE) ? 1 : 0;
     int isReadOnlyC = (isReadOnly == JNI_TRUE) ? 1 : 0;
-    NewTxnResult res = CreateTransaction((uintptr_t)nodePtr, isConcurrentC, isReadOnlyC);
+    NewTxnResult res = CreateTransaction((uintptr_t)nodePtr, isReadOnlyC);
     return returnDefraTransactionResult(env, res);
 }
 
@@ -1515,6 +1513,7 @@ JNIEXPORT jobject JNICALL Java_source_defra_DefraCollection_DeleteIndexNative(
     return returnDefraResult(env, res);
 }
 
+#ifdef BLE_ENABLED
 JNIEXPORT jboolean JNICALL
 Java_source_defra_DefraBLE_handleFoundPeer(JNIEnv *env, jclass clazz, jstring remotePID) {
     const char *pid = (*env)->GetStringUTFChars(env, remotePID, NULL);
@@ -1548,3 +1547,4 @@ Java_source_defra_DefraBLE_registerBleInterface(JNIEnv *env, jclass clazz, jobje
     (*env)->GetJavaVM(env, &gJVM);
     gBleInterface = (*env)->NewGlobalRef(env, bleInterface);
 }
+#endif
