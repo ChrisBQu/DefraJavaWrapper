@@ -1,5 +1,9 @@
 # DefraJavaWrapper
 
+**This work is still in active development, and is in an experimental state.**
+**It has feature parity with other Defra clients, but may not be production ready.**
+**Please be aware of this if you choose to use it.**
+
 **Pre-Requisites**
 
 The pre-requisite for this working, is that the user has the Android NDK installed on his or her system, and that the environment variable `ANDROID_NDK` is set, appropriately, to its location. 
@@ -84,7 +88,6 @@ import source.defra.DefraCollectionOptions;
 import source.defra.DefraIdentity;
 import source.defra.DefraNode;
 import source.defra.DefraNodeInitOptions;
-import source.defra.DefraResult;
 ```
 
 You will then be able to use them in your code.
