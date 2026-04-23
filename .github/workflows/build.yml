@@ -30,7 +30,9 @@ jobs:
         run: git clone https://github.com/sourcenetwork/defradb /tmp/defradb
 
       - name: Make scripts executable
-        run: chmod +x gradlew build.sh
+        run: |
+          chmod +x gradlew build.sh
+          find /tmp/defradb -name "*.sh" -exec chmod +x {} +
 
       - name: Build Linux library
         run: ./build.sh --defra-dir /tmp/defradb --linux
@@ -72,7 +74,9 @@ jobs:
         run: git clone https://github.com/sourcenetwork/defradb /tmp/defradb
 
       - name: Make scripts executable
-        run: chmod +x gradlew build.sh
+        run: |
+          chmod +x gradlew build.sh
+          find /tmp/defradb -name "*.sh" -exec chmod +x {} +
 
       - name: Build Android library
         run: ./build.sh --defra-dir /tmp/defradb --android
