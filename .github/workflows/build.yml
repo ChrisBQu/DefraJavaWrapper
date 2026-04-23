@@ -36,6 +36,8 @@ jobs:
 
       - name: Build Linux library
         run: ./build.sh --defra-dir /tmp/defradb --linux
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.logging.level=info"
 
       - name: Compile test
         run: |
