@@ -46,7 +46,7 @@ jobs:
         run: java -cp build/libs/defradb.jar:test-out DefraTest
 
   build-android:
-    name: Build Android Library
+    name: Build Android Library and Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -82,3 +82,17 @@ jobs:
         run: ./build.sh --defra-dir /tmp/defradb --android
         env:
           ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run Android instrumented tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          disable-animations: true
+          script: cd androidTest && ../gradlew connectedAndroidTest

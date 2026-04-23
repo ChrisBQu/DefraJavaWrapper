@@ -1,0 +1,24 @@
+plugins {
+    id 'com.android.application' version '8.1.0'
+}
+
+android {
+    namespace 'source.defra.test'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'source.defra.test'
+        minSdk 24
+        targetSdk 34
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        ndk {
+            abiFilters 'x86_64'
+        }
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: '../build/outputs/aar', include: ['*-debug.aar'])
+    androidTestImplementation 'androidx.test:runner:1.6.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
