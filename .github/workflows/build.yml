@@ -97,7 +97,7 @@ jobs:
       - name: Stage AAR for instrumented test module
         run: |
           mkdir -p androidTest/libs
-          cp build/outputs/aar/*-debug.aar androidTest/libs/defradb.aar
+          cp build/outputs/aar/*-release.aar androidTest/libs/defradb.aar
 
       - name: Enable KVM
         run: |

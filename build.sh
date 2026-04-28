@@ -96,7 +96,7 @@ if [ "$android_present" = true ]; then
     fi
 
     echo "Running Android Gradle build..."
-    "$script_dir/gradlew" -b "$script_dir/build-android.gradle" build
+    "$script_dir/gradlew" -b "$script_dir/build-android.gradle" assembleRelease
     if [ $? -eq 0 ]; then
         echo "Android Gradle build successful"
     else
