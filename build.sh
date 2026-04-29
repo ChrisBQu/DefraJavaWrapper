@@ -4,6 +4,7 @@ linux_present=false
 ble_enabled=false
 cleanup=false
 defra_dir=""
+silent=false
 script_dir="$(pwd)"
 
 # -------------------------
@@ -23,6 +24,10 @@ while [[ $# -gt 0 ]]; do
             cleanup=true
             shift
             ;;
+        --silent)
+            silent=true
+            shift
+            ;;
         --defra-dir)
             if [ -z "$2" ]; then
                 echo "Error: --defra-dir requires a path"
@@ -40,9 +45,12 @@ done
 
 if [ -z "$defra_dir" ]; then
     echo "Error: --defra-dir is required"
-    echo "Usage: ./build.sh [ --android ] [ --linux ] [ --cleanup ] --defra-dir <path>"
+    echo "Usage: ./build.sh [ --android ] [ --linux ] [ --cleanup ] [ --silent ] --defra-dir <path>"
     exit 1
 fi
+
+BUILD_TAGS_FLAG=""
+[ "$silent" = true ] && BUILD_TAGS_FLAG="BUILD_TAGS=silent"
 
 defra_dir_abs="$defra_dir"
 
@@ -56,7 +64,7 @@ mkdir -p "$script_dir/src/main/c"
 # -------------------------
 if [ "$android_present" = true ]; then
     echo "Running Android build..."
-    (cd "$defra_dir_abs" && make build-c-shared-android)
+    (cd "$defra_dir_abs" && make build-c-shared-android $BUILD_TAGS_FLAG)
     if [ $? -ne 0 ]; then
         echo "make build-c-shared-android FAILED"
         exit 1
@@ -87,8 +95,6 @@ if [ "$android_present" = true ]; then
     echo "Running C build for Android..."
     if [ -f "$script_dir/src/main/c/build.sh" ]; then
         chmod +x "$script_dir/src/main/c/build.sh"
-        BLE_FLAG=""
-        [ "$ble_enabled" = true ] && BLE_FLAG="--ble-enabled"
         (cd "$script_dir/src/main/c" && ./build.sh --android)
         echo "Android C build completed"
     else
@@ -110,7 +116,7 @@ fi
 # -------------------------
 if [ "$linux_present" = true ]; then
     echo "Running Linux build..."
-    (cd "$defra_dir_abs" && make build-c-shared-linux)
+    (cd "$defra_dir_abs" && make build-c-shared-linux $BUILD_TAGS_FLAG)
     if [ $? -ne 0 ]; then
         echo "make build-c-shared-linux FAILED"
         exit 1
